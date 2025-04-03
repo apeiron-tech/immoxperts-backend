@@ -62,6 +62,7 @@ artifacts:
     objects:
         location: 'gs://${_BUCKET}/artifacts/$BRANCH_NAME/$REVISION_ID'
         paths: ['target/*.jar']
+
+logsBucket: 'gs://immoxperts-devops'
 timeout: '1600s'
-options:
-    machineType: 'E2_HIGHCPU_8'
+
