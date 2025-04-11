@@ -2,8 +2,13 @@ package com.service.teststage.Controller;
 
 
 
+import com.service.teststage.Repository.MutationCustomRepository;
+import com.service.teststage.Repository.MutationRepository;
 import com.service.teststage.Service.MutationService;
+import com.service.teststage.Service.PropertyStatisticsService;
+import com.service.teststage.dto.CommuneStatsDTO;
 import com.service.teststage.dto.MutationDTO;
+import com.service.teststage.dto.PropertyStatisticsDTO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,9 +17,18 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/mutations")
 public class MutationController {
+    private final PropertyStatisticsService propertyStatisticsService;
+
 
     @Autowired
     private MutationService mutationService;
+    @Autowired
+    private final MutationCustomRepository mutationRepository;
+
+    public MutationController(PropertyStatisticsService propertyStatisticsService, MutationCustomRepository mutationRepository) {
+        this.propertyStatisticsService = propertyStatisticsService;
+        this.mutationRepository = mutationRepository;
+    }
 
     @GetMapping("/by-address/{adresseId}")
     public ResponseEntity<List<MutationDTO>> getMutationsByAddress(
@@ -38,4 +52,21 @@ if(mutations.isEmpty()) {
 
         return mutationService.searchMutations(novoie, voie);
     }
+    @GetMapping("/commune")
+    public ResponseEntity<CommuneStatsDTO> getCommuneStats(
+            @RequestParam("commune") String commune // Annotation corrigée
+    ) {
+        return ResponseEntity.ok(
+                mutationRepository.getStatsByCommune(commune)
+        );
+    }
+
+    @GetMapping("/statistics/{commune}")
+    public ResponseEntity<List<PropertyStatisticsDTO>> getPropertyStatistics(@PathVariable String commune) {
+        List<PropertyStatisticsDTO> statistics = propertyStatisticsService.getPropertyStatisticsByCommune(commune);
+        return ResponseEntity.ok(statistics);
+    }
+
+
+
 }
