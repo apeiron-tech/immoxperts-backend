@@ -15,5 +15,14 @@ public class WebConfig implements WebMvcConfigurer {
          registry.addMapping("/**")
                 .allowedOrigins("https://immoxperts.apeiron-tech.dev")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+        
+         registry.addMapping("/**")
+                .allowedOrigins("https://mapbox.com")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS"); 
+            
+        registry.addMapping("/**")
+                .allowedOrigins("https://events.mapbox.com")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS"); 
+
     }
 }
