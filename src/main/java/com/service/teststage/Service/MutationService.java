@@ -43,7 +43,9 @@ public class MutationService {
             Map.entry("ROUTE", "RTE"),
             Map.entry("SQUARE", "SQ"),
             Map.entry("GALERIE", "GAL"),
-            Map.entry("QUAI", "QUAI")
+            Map.entry("RESIDENCE", "RES"),
+            Map.entry("QUAI", "QUAI"),
+            Map.entry("QUARTIER ", "QRT")
     );
     public List<MutationDTO> getMutationsByAdresseId(Integer idadresse) {
 
@@ -108,8 +110,6 @@ public class MutationService {
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
-
-
 
 
 
