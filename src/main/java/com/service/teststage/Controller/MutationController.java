@@ -54,7 +54,7 @@ if(mutations.isEmpty()) {
     }
     @GetMapping("/commune")
     public ResponseEntity<CommuneStatsDTO> getCommuneStats(
-            @RequestParam("commune") String commune // Annotation corrigée
+            @RequestParam("commune") String commune
     ) {
         return ResponseEntity.ok(
                 mutationRepository.getStatsByCommune(commune)
@@ -67,6 +67,14 @@ if(mutations.isEmpty()) {
         return ResponseEntity.ok(statistics);
     }
 
+    @GetMapping("/mutations/by-street-and-commune")
+    public ResponseEntity<List<MutationDTO>> searchMutationsByStreetAndCommune(
+            @RequestParam("street") String street,
+            @RequestParam("commune") String commune
+    ) {
+        List<MutationDTO> results = mutationService.searchMutationsByStreetAndCommune(street, commune);
+        return ResponseEntity.ok(results);
+    }
 
 
 }
