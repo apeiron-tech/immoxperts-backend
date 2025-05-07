@@ -24,4 +24,13 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
             "JOIN m.adresseDispoparcs ad " +
             "WHERE ad.adresse.idadresse = :idadresse") // Navigate through Adresse entity
     List<Mutation> findByAdresseDispoParcId(@Param("idadresse") Integer idadresse);
+    @Query("""
+    SELECT m FROM Mutation m 
+    JOIN m.adresseLocals al 
+    JOIN al.adresse a 
+    WHERE UPPER(a.voie) LIKE %:street% 
+      AND UPPER(a.commune) = UPPER(:commune)
+    """)
+    List<Mutation> findMutationsByStreetAndCommune(@Param("street") String street, @Param("commune") String commune);
+
 }
