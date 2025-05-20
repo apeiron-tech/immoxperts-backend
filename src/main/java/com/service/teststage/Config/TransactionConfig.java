@@ -1,11 +1,23 @@
 package com.service.teststage.Config;
 
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import jakarta.persistence.EntityManagerFactory;
 
 @Configuration
 @EnableTransactionManagement
 public class TransactionConfig {
-    // Configuration is handled by Spring Boot's auto-configuration
-    // This class just enables explicit transaction management
+
+    @Bean
+    public PlatformTransactionManager transactionManager(EntityManagerFactory entityManagerFactory) {
+        JpaTransactionManager transactionManager = new JpaTransactionManager();
+        transactionManager.setEntityManagerFactory(entityManagerFactory);
+        transactionManager.setDefaultTimeout(30); // 30 seconds
+        transactionManager.setRollbackOnCommitFailure(true);
+        return transactionManager;
+    }
 } 

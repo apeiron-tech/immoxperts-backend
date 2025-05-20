@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheConfig;
+import org.springframework.transaction.annotation.Isolation;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -177,7 +178,7 @@ public class MutationService {
         maxAttempts = 3,
         backoff = @Backoff(delay = 1000, multiplier = 2)
     )
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public Page<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune, Pageable pageable) {
         if (street == null || street.trim().isEmpty() || commune == null || commune.trim().isEmpty()) {
             return Page.empty(pageable);
@@ -197,7 +198,7 @@ public class MutationService {
         } catch (Exception e) {
             // Log the error
             System.err.println("Error searching mutations: " + e.getMessage());
-            throw e; // Re-throw to trigger retry
+            throw new RuntimeException("Error searching mutations", e);
         }
     }
     public List<MutationDTO> getMutationsByVoie(String voie) {
