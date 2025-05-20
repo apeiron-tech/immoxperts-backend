@@ -6,10 +6,10 @@ import org.springframework.retry.annotation.EnableRetry;
 
 @SpringBootApplication
 @EnableRetry
-public class TeststageApplication {
+public class TestStageApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(TeststageApplication.class, args);
+        SpringApplication.run(TestStageApplication.class, args);
     }
 
 }
