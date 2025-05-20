@@ -42,7 +42,7 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
                 WHERE UPPER(a.voie) = UPPER(:street)
                 AND UPPER(a.commune) = UPPER(:commune)
             )
-            SELECT /*+ INDEX(m mutation_pkey) INDEX(al adresse_local_pkey) INDEX(ad adresse_dispoparc_pkey) INDEX(a adresse_pkey) */ 
+            SELECT /*+ INDEX(m mutation_pkey) INDEX(al adresse_local_pkey) INDEX(ad adresse_dispoparc_pkey) INDEX(a adresse_pkey) SET statement_timeout = '60s' */ 
                    m.* 
             FROM mutation m
             WHERE m.idmutation IN (SELECT idmutation FROM filtered_mutations)
@@ -64,7 +64,7 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
                 WHERE UPPER(a.voie) = UPPER(:street)
                 AND UPPER(a.commune) = UPPER(:commune)
             )
-            SELECT /*+ INDEX(m mutation_pkey) */ COUNT(*) 
+            SELECT /*+ INDEX(m mutation_pkey) SET statement_timeout = '60s' */ COUNT(*) 
             FROM mutation m
             WHERE m.idmutation IN (SELECT idmutation FROM filtered_mutations)
             """,
@@ -75,7 +75,7 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
             Pageable pageable);
 
     @Query(value = """
-            SELECT m.* FROM mutation m
+            SELECT /*+ SET statement_timeout = '60s' */ m.* FROM mutation m
             JOIN adresse_local al ON m.idmutation = al.idmutation
             JOIN adresse a ON al.idadresse = a.idadresse
             WHERE UPPER(a.voie) = UPPER(:street)
@@ -89,7 +89,7 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
             ORDER BY datemut DESC
             """,
             countQuery = """
-            SELECT COUNT(*) FROM (
+            SELECT /*+ SET statement_timeout = '60s' */ COUNT(*) FROM (
                 SELECT DISTINCT m.idmutation FROM mutation m
                 JOIN adresse_local al ON m.idmutation = al.idmutation
                 JOIN adresse a ON al.idadresse = a.idadresse
