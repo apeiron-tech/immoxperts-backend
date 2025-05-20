@@ -19,10 +19,10 @@ public class Mutation {
     @Column(name = "sterr")
     private BigDecimal sterr;
 
-    @OneToMany(mappedBy = "mutation")
+    @OneToMany(mappedBy = "mutation", fetch = FetchType.EAGER)
     private List<AdresseLocal> adresseLocals = new ArrayList<>();
 
-    @OneToMany(mappedBy = "mutation")
+    @OneToMany(mappedBy = "mutation", fetch = FetchType.EAGER)
     private List<AdresseDispoparc> adresseDispoparcs = new ArrayList<>();
 
     @Column(name = "valeurfonc", precision = 15, scale = 2)

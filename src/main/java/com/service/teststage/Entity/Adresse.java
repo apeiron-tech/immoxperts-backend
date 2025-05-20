@@ -1,6 +1,5 @@
 package com.service.teststage.Entity;
 
-
 import jakarta.persistence.*;
 
 import java.util.ArrayList;
@@ -11,7 +10,8 @@ import java.util.List;
 public class Adresse {
     @Id
     private Integer idadresse;
-    @OneToMany(mappedBy = "adresse")
+    
+    @OneToMany(mappedBy = "adresse", fetch = FetchType.EAGER)
     private List<AdresseDispoparc> adresseDispoparcs = new ArrayList<>();
 
     private Integer novoie;      // Integer (matches database `integer` type)
@@ -21,6 +21,10 @@ public class Adresse {
     private String voie;         // String (matches `varchar(254)`)
     private String codepostal;   // String (matches `varchar(5)`)
     private String commune;      // String (matches `varchar(45)`)
+    private String coddep;
+    
+    @OneToMany(mappedBy = "adresse", fetch = FetchType.EAGER)
+    private List<AdresseLocal> adresseLocals = new ArrayList<>();
 
     public String getTypvoie() {
         return typvoie;
@@ -53,10 +57,6 @@ public class Adresse {
     public void setCodvoie(String codvoie) {
         this.codvoie = codvoie;
     }
-
-    private String coddep;
-    @OneToMany(mappedBy = "adresse")
-    private List<AdresseLocal> adresseLocals;
 
     // Getters and setters
     public Integer getIdadresse() {
