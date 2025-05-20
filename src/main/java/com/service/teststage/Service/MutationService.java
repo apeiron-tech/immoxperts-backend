@@ -10,6 +10,8 @@ import com.service.teststage.Repository.MutationRepository;
 import com.service.teststage.dto.MutationDTO;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -163,40 +165,21 @@ public class MutationService {
     }
 
 
-    public List<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune) {
+    public Page<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune, Pageable pageable) {
         if (street == null || street.trim().isEmpty() || commune == null || commune.trim().isEmpty()) {
-            return Collections.emptyList();
+            return Page.empty(pageable);
         }
 
         String normalizedStreet = street.trim().toUpperCase();
         String normalizedCommune = commune.trim().toUpperCase();
 
-        List<Adresse> addresses = adresseRepository.findAll((root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.equal(cb.upper(root.get("voie")), normalizedStreet));
-            predicates.add(cb.equal(cb.upper(root.get("commune")), normalizedCommune));
-            return cb.and(predicates.toArray(new Predicate[0]));
-        });
+        Page<Mutation> mutations = mutationRepository.findMutationsByStreetAndCommune(
+            normalizedStreet, 
+            normalizedCommune,
+            pageable
+        );
 
-        return addresses.stream()
-                // For each address, extract the first non-null mutation from its related entities
-                .map(adresse ->
-                        Stream.concat(
-                                        adresse.getAdresseLocals().stream(),
-                                        adresse.getAdresseDispoparcs().stream()
-                                )
-                                .map(ae -> (ae instanceof AdresseLocal)
-                                        ? ((AdresseLocal) ae).getMutation()
-                                        : ((AdresseDispoparc) ae).getMutation()
-                                )
-                                .filter(Objects::nonNull)
-                                .findFirst() // Get the first mutation for this address
-                                .orElse(null) // If no mutation found, map to null
-                )
-                .filter(Objects::nonNull) // Remove addresses with no mutations
-                .distinct() // Ensure mutations are unique (optional, depending on your needs)
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+        return mutations.map(this::convertToDTO);
     }
     public List<MutationDTO> getMutationsByVoie(String voie) {
 

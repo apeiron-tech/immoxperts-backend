@@ -10,6 +10,10 @@ import com.service.teststage.dto.CommuneStatsDTO;
 import com.service.teststage.dto.MutationDTO;
 import com.service.teststage.dto.PropertyStatisticsDTO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -68,11 +72,18 @@ if(mutations.isEmpty()) {
     }
 
     @GetMapping("/mutations/by-street-and-commune")
-    public ResponseEntity<List<MutationDTO>> searchMutationsByStreetAndCommune(
+    public ResponseEntity<Page<MutationDTO>> searchMutationsByStreetAndCommune(
             @RequestParam("street") String street,
-            @RequestParam("commune") String commune
+            @RequestParam("commune") String commune,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "datemut") String sortBy,
+            @RequestParam(defaultValue = "DESC") String direction
     ) {
-        List<MutationDTO> results = mutationService.searchMutationsByStreetAndCommune(street, commune);
+        Sort.Direction sortDirection = Sort.Direction.fromString(direction);
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDirection, sortBy));
+        
+        Page<MutationDTO> results = mutationService.searchMutationsByStreetAndCommune(street, commune, pageable);
         return ResponseEntity.ok(results);
     }
 
