@@ -12,7 +12,10 @@ import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -165,6 +168,12 @@ public class MutationService {
     }
 
 
+    @Retryable(
+        value = { Exception.class },
+        maxAttempts = 3,
+        backoff = @Backoff(delay = 1000, multiplier = 2)
+    )
+    @Transactional(readOnly = true)
     public Page<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune, Pageable pageable) {
         if (street == null || street.trim().isEmpty() || commune == null || commune.trim().isEmpty()) {
             return Page.empty(pageable);
@@ -173,13 +182,19 @@ public class MutationService {
         String normalizedStreet = street.trim().toUpperCase();
         String normalizedCommune = commune.trim().toUpperCase();
 
-        Page<Mutation> mutations = mutationRepository.findMutationsByStreetAndCommune(
-            normalizedStreet, 
-            normalizedCommune,
-            pageable
-        );
+        try {
+            Page<Mutation> mutations = mutationRepository.findMutationsByStreetAndCommune(
+                normalizedStreet, 
+                normalizedCommune,
+                pageable
+            );
 
-        return mutations.map(this::convertToDTO);
+            return mutations.map(this::convertToDTO);
+        } catch (Exception e) {
+            // Log the error
+            System.err.println("Error searching mutations: " + e.getMessage());
+            throw e; // Re-throw to trigger retry
+        }
     }
     public List<MutationDTO> getMutationsByVoie(String voie) {
 

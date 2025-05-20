@@ -2,12 +2,14 @@ package com.service.teststage;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.retry.annotation.EnableRetry;
 
 @SpringBootApplication
-public class TestStageApplication {
+@EnableRetry
+public class TeststageApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(TestStageApplication.class, args);
+        SpringApplication.run(TeststageApplication.class, args);
     }
 
 }

@@ -42,7 +42,8 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
                 WHERE UPPER(a.voie) = UPPER(:street)
                 AND UPPER(a.commune) = UPPER(:commune)
             )
-            SELECT m.* FROM mutation m
+            SELECT /*+ MAX_EXECUTION_TIME(30000) */ m.* 
+            FROM mutation m
             WHERE m.idmutation IN (SELECT idmutation FROM filtered_mutations)
             """, 
             countQuery = """
@@ -61,7 +62,8 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
                 WHERE UPPER(a.voie) = UPPER(:street)
                 AND UPPER(a.commune) = UPPER(:commune)
             )
-            SELECT COUNT(*) FROM mutation m
+            SELECT /*+ MAX_EXECUTION_TIME(30000) */ COUNT(*) 
+            FROM mutation m
             WHERE m.idmutation IN (SELECT idmutation FROM filtered_mutations)
             """,
             nativeQuery = true)
