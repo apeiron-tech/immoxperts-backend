@@ -173,30 +173,31 @@ public class MutationService {
 
         List<Adresse> addresses = adresseRepository.findAll((root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-
-            // Exact match for normalized street name
             predicates.add(cb.equal(cb.upper(root.get("voie")), normalizedStreet));
-
-            // Exact match for normalized commune
             predicates.add(cb.equal(cb.upper(root.get("commune")), normalizedCommune));
-
             return cb.and(predicates.toArray(new Predicate[0]));
         });
 
         return addresses.stream()
-                .flatMap(adresse -> Stream.concat(
-                        adresse.getAdresseLocals().stream(),
-                        adresse.getAdresseDispoparcs().stream()
-                ))
-                .map(ae -> (ae instanceof AdresseLocal) ?
-                        ((AdresseLocal) ae).getMutation() :
-                        ((AdresseDispoparc) ae).getMutation())
-                .filter(Objects::nonNull)
-                .distinct()
+                // For each address, extract the first non-null mutation from its related entities
+                .map(adresse ->
+                        Stream.concat(
+                                        adresse.getAdresseLocals().stream(),
+                                        adresse.getAdresseDispoparcs().stream()
+                                )
+                                .map(ae -> (ae instanceof AdresseLocal)
+                                        ? ((AdresseLocal) ae).getMutation()
+                                        : ((AdresseDispoparc) ae).getMutation()
+                                )
+                                .filter(Objects::nonNull)
+                                .findFirst() // Get the first mutation for this address
+                                .orElse(null) // If no mutation found, map to null
+                )
+                .filter(Objects::nonNull) // Remove addresses with no mutations
+                .distinct() // Ensure mutations are unique (optional, depending on your needs)
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
-
     public List<MutationDTO> getMutationsByVoie(String voie) {
 
         List<Adresse> addresses = adresseRepository.findByVoieContainingIgnoreCase(voie);
