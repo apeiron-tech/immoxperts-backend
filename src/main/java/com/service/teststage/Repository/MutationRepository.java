@@ -27,7 +27,7 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
             "WHERE ad.adresse.idadresse = :idadresse") // Navigate through Adresse entity
     List<Mutation> findByAdresseDispoParcId(@Param("idadresse") Integer idadresse);
     @Query(value = """
-            WITH filtered_mutations AS (
+            WITH RECURSIVE filtered_mutations AS (
                 SELECT DISTINCT m.idmutation
                 FROM mutation m
                 JOIN adresse_local al ON m.idmutation = al.idmutation
@@ -42,13 +42,14 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
                 WHERE UPPER(a.voie) = UPPER(:street)
                 AND UPPER(a.commune) = UPPER(:commune)
             )
-            SELECT /*+ INDEX(m mutation_pkey) INDEX(al adresse_local_pkey) INDEX(ad adresse_dispoparc_pkey) INDEX(a adresse_pkey) */ m.* 
+            SELECT /*+ INDEX(m mutation_pkey) INDEX(al adresse_local_pkey) INDEX(ad adresse_dispoparc_pkey) INDEX(a adresse_pkey) */ 
+                   m.* 
             FROM mutation m
             WHERE m.idmutation IN (SELECT idmutation FROM filtered_mutations)
             ORDER BY m.datemut DESC
             """, 
             countQuery = """
-            WITH filtered_mutations AS (
+            WITH RECURSIVE filtered_mutations AS (
                 SELECT DISTINCT m.idmutation
                 FROM mutation m
                 JOIN adresse_local al ON m.idmutation = al.idmutation
@@ -70,6 +71,41 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
             nativeQuery = true)
     Page<Mutation> findMutationsByStreetAndCommune(
             @Param("street") String street, 
+            @Param("commune") String commune,
+            Pageable pageable);
+
+    @Query(value = """
+            SELECT m.* FROM mutation m
+            JOIN adresse_local al ON m.idmutation = al.idmutation
+            JOIN adresse a ON al.idadresse = a.idadresse
+            WHERE UPPER(a.voie) = UPPER(:street)
+            AND UPPER(a.commune) = UPPER(:commune)
+            UNION
+            SELECT m.* FROM mutation m
+            JOIN adresse_dispoparc ad ON m.idmutation = ad.idmutation
+            JOIN adresse a ON ad.idadresse = a.idadresse
+            WHERE UPPER(a.voie) = UPPER(:street)
+            AND UPPER(a.commune) = UPPER(:commune)
+            ORDER BY datemut DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT m.idmutation FROM mutation m
+                JOIN adresse_local al ON m.idmutation = al.idmutation
+                JOIN adresse a ON al.idadresse = a.idadresse
+                WHERE UPPER(a.voie) = UPPER(:street)
+                AND UPPER(a.commune) = UPPER(:commune)
+                UNION
+                SELECT DISTINCT m.idmutation FROM mutation m
+                JOIN adresse_dispoparc ad ON m.idmutation = ad.idmutation
+                JOIN adresse a ON ad.idadresse = a.idadresse
+                WHERE UPPER(a.voie) = UPPER(:street)
+                AND UPPER(a.commune) = UPPER(:commune)
+            ) subquery
+            """,
+            nativeQuery = true)
+    Page<Mutation> findMutationsByStreetAndCommuneFull(
+            @Param("street") String street,
             @Param("commune") String commune,
             Pageable pageable);
 }

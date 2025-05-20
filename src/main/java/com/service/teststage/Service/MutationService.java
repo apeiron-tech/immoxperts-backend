@@ -172,7 +172,12 @@ public class MutationService {
     }
 
 
-    @Cacheable(key = "#street + '-' + #commune + '-' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort")
+    @Cacheable(
+        value = "mutations",
+        key = "#street + '-' + #commune + '-' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort",
+        unless = "#result == null || #result.isEmpty()",
+        condition = "#street != null && #commune != null"
+    )
     @Retryable(
         value = { Exception.class },
         maxAttempts = 3,
@@ -188,11 +193,21 @@ public class MutationService {
         String normalizedCommune = commune.trim().toUpperCase();
 
         try {
+            // First try to get data from materialized view
             Page<Mutation> mutations = mutationRepository.findMutationsByStreetAndCommune(
                 normalizedStreet, 
                 normalizedCommune,
                 pageable
             );
+
+            if (mutations.isEmpty()) {
+                // If no results in materialized view, try the full query
+                mutations = mutationRepository.findMutationsByStreetAndCommuneFull(
+                    normalizedStreet,
+                    normalizedCommune,
+                    pageable
+                );
+            }
 
             return mutations.map(this::convertToDTO);
         } catch (Exception e) {
