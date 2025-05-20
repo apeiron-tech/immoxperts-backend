@@ -16,6 +16,8 @@ import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.CacheConfig;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -25,6 +27,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
+@CacheConfig(cacheNames = "mutations")
 public class MutationService {
 
     @Autowired
@@ -168,6 +171,7 @@ public class MutationService {
     }
 
 
+    @Cacheable(key = "#street + '-' + #commune + '-' + #pageable.pageNumber + '-' + #pageable.pageSize + '-' + #pageable.sort")
     @Retryable(
         value = { Exception.class },
         maxAttempts = 3,
