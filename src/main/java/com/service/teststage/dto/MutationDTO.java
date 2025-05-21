@@ -22,6 +22,25 @@ public class MutationDTO {
 
     private BigDecimal Terrain;
 
+    // Default constructor
+    public MutationDTO() {
+    }
+
+    // Parameterized constructor
+    public MutationDTO(Integer idmutation, Date datemut, BigDecimal valeurfonc, Integer idnatmut, String coddep,
+                      List<String> libtyplocList, Integer nbpprincTotal, List<String> addresses, 
+                      BigDecimal surface, BigDecimal terrain) {
+        this.idmutation = idmutation;
+        this.datemut = datemut;
+        this.valeurfonc = valeurfonc;
+        this.idnatmut = idnatmut;
+        this.coddep = coddep;
+        this.libtyplocList = libtyplocList;
+        this.nbpprincTotal = nbpprincTotal;
+        this.addresses = addresses;
+        this.Surface = surface;
+        this.Terrain = terrain;
+    }
 
     public List<String> getLibtyplocList() {
         return libtyplocList;

@@ -1,7 +1,5 @@
 package com.service.teststage.Service;
 
-
-
 import com.service.teststage.Entity.*;
 import com.service.teststage.Repository.AdresseLocalRepository;
 import com.service.teststage.Repository.AdresseRepository;
@@ -13,6 +11,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -60,108 +63,142 @@ public class MutationService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<MutationDTO> searchMutations(String novoieStr, String voie) {
-        final Integer[] finalNovoie = {null};
-        final String[] finalBtq = {null};
-        final String[] finalTypvoie = {null};
-        final String[] finalVoieRestante = {null};
+        // Early return if both inputs are empty
+        if ((novoieStr == null || novoieStr.trim().isEmpty()) && 
+            (voie == null || voie.trim().isEmpty())) {
+            return Collections.emptyList();
+        }
 
-        // Traitement amélioré de novoieStr pour gérer les cas comme "68B" ou "68bis"
-        if(novoieStr != null && !novoieStr.trim().isEmpty()) {
-            Matcher matcher = Pattern.compile("^(\\d+)([A-Za-z]*)$").matcher(novoieStr.trim());
-            if(matcher.find()) {
-                String numeroPart = matcher.group(1);
-                try {
-                    finalNovoie[0] = Integer.parseInt(numeroPart);
-                } catch (NumberFormatException ignored) {}
-
-                String complement = matcher.group(2);
-                if(complement != null && !complement.isEmpty()) {
-                    if(complement.equalsIgnoreCase("B") || complement.equalsIgnoreCase("BIS")) {
-                        finalBtq[0] = "BIS";
-                    } else if(complement.equalsIgnoreCase("T") || complement.equalsIgnoreCase("TER")) {
-                        finalBtq[0] = "TER";
-                    } else {
-                        finalBtq[0] = complement.toUpperCase();
+        // Parse number and complement in one pass
+        final Integer novoie;
+        final String btq;
+        {
+            Integer parsedNovoie = null;
+            String parsedBtq = null;
+            
+            if (novoieStr != null && !novoieStr.trim().isEmpty()) {
+                String trimmed = novoieStr.trim();
+                int i = 0;
+                while (i < trimmed.length() && Character.isDigit(trimmed.charAt(i))) {
+                    i++;
+                }
+                if (i > 0) {
+                    try {
+                        parsedNovoie = Integer.parseInt(trimmed.substring(0, i));
+                        if (i < trimmed.length()) {
+                            String complement = trimmed.substring(i).toUpperCase();
+                            if (complement.equals("B") || complement.equals("BIS")) {
+                                parsedBtq = "BIS";
+                            } else if (complement.equals("T") || complement.equals("TER")) {
+                                parsedBtq = "TER";
+                            } else {
+                                parsedBtq = complement;
+                            }
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // Keep null values
                     }
                 }
             }
+            novoie = parsedNovoie;
+            btq = parsedBtq;
         }
 
-        // Traitement amélioré de la voie
-        if(voie != null && !voie.trim().isEmpty()) {
-            String voieTrimmed = voie.trim();
+        // Process voie more efficiently
+        final String typvoie;
+        final String voieRestante;
+        {
+            String foundTypvoie = null;
+            String foundVoieRestante = null;
+            
+            if (voie != null && !voie.trim().isEmpty()) {
+                String voieTrimmed = voie.trim().toUpperCase();
+                
+                for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
+                    String typeVoieKey = entry.getKey();
+                    if (voieTrimmed.startsWith(typeVoieKey)) {
+                        foundTypvoie = entry.getValue();
+                        foundVoieRestante = voieTrimmed.substring(typeVoieKey.length()).trim();
+                        break;
+                    }
+                }
+                
+                if (foundTypvoie == null && voieTrimmed.contains(" ")) {
+                    String firstWord = voieTrimmed.split(" ", 2)[0];
+                    foundTypvoie = TYPE_VOIE_MAPPING.getOrDefault(firstWord, firstWord);
+                    foundVoieRestante = voieTrimmed.substring(firstWord.length()).trim();
+                }
+            }
+            
+            typvoie = foundTypvoie;
+            voieRestante = foundVoieRestante;
+        }
 
-            for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
-                String typeVoieKey = entry.getKey();
-                Pattern pattern = Pattern.compile("^" + typeVoieKey + "\\s+|^" + typeVoieKey + "$",
-                        Pattern.CASE_INSENSITIVE);
-                Matcher matcher = pattern.matcher(voieTrimmed);
-                if (matcher.find()) {
-                    finalTypvoie[0] = entry.getValue();
-                    voieTrimmed = voieTrimmed.substring(matcher.end()).trim();
-                    break;
+        // Use Set to avoid duplicates more efficiently
+        Set<Mutation> uniqueMutations = new HashSet<>();
+        int pageNumber = 0;
+        final int pageSize = 1000;
+        boolean hasMorePages = true;
+
+        while (hasMorePages) {
+            Pageable pageable = PageRequest.of(pageNumber, pageSize);
+            
+            // Build predicates more efficiently
+            Page<Adresse> addressPage = adresseRepository.findAll((root, query, cb) -> {
+                List<Predicate> predicates = new ArrayList<>(4); // Pre-allocate with expected size
+
+                if (novoie != null) {
+                    predicates.add(cb.equal(root.get("novoie"), novoie));
+                }
+
+                if (btq != null) {
+                    predicates.add(cb.equal(cb.upper(root.get("btq")), btq));
+                }
+
+                if (typvoie != null) {
+                    predicates.add(cb.equal(cb.upper(root.get("typvoie")), typvoie));
+                }
+
+                if (voieRestante != null) {
+                    predicates.add(cb.like(cb.upper(root.get("voie")), "%" + voieRestante + "%"));
+                }
+
+                return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(new Predicate[0]));
+            }, pageable);
+
+            // Process addresses in a single pass
+            for (Adresse adresse : addressPage.getContent()) {
+                if (adresse.getAdresseLocals() != null) {
+                    for (AdresseLocal al : adresse.getAdresseLocals()) {
+                        if (al.getMutation() != null) {
+                            uniqueMutations.add(al.getMutation());
+                        }
+                    }
+                }
+                if (adresse.getAdresseDispoparcs() != null) {
+                    for (AdresseDispoparc adp : adresse.getAdresseDispoparcs()) {
+                        if (adp.getMutation() != null) {
+                            uniqueMutations.add(adp.getMutation());
+                        }
+                    }
                 }
             }
 
-            if (finalTypvoie[0] == null && voieTrimmed.contains(" ")) {
-                String firstWord = voieTrimmed.split(" ", 2)[0];
-                finalTypvoie[0] = TYPE_VOIE_MAPPING.getOrDefault(firstWord.toUpperCase(), firstWord);
-                voieTrimmed = voieTrimmed.substring(firstWord.length()).trim();
-            }
-
-            finalVoieRestante[0] = voieTrimmed;
+            hasMorePages = addressPage.hasNext();
+            pageNumber++;
         }
 
-        // Build the native SQL query
-        StringBuilder sql = new StringBuilder();
-        sql.append("SELECT DISTINCT m.* FROM dvf.mutation m ")
-           .append("LEFT JOIN dvf.adresse_local al ON m.idmutation = al.idmutation ")
-           .append("LEFT JOIN dvf.adresse_dispoparc ad ON m.idmutation = ad.idmutation ")
-           .append("LEFT JOIN dvf.adresse a ON (al.idadresse = a.idadresse OR ad.idadresse = a.idadresse) ")
-           .append("WHERE 1=1 ");
-
-        List<Object> params = new ArrayList<>();
-        int paramIndex = 1;
-
-        if (finalNovoie[0] != null) {
-            sql.append("AND a.novoie = ?").append(paramIndex++).append(" ");
-            params.add(finalNovoie[0]);
+        // Convert to DTOs
+        List<MutationDTO> result = new ArrayList<>(uniqueMutations.size());
+        for (Mutation mutation : uniqueMutations) {
+            result.add(convertToDTO(mutation));
         }
-
-        if (finalBtq[0] != null) {
-            sql.append("AND UPPER(a.btq) = UPPER(?").append(paramIndex++).append(") ");
-            params.add(finalBtq[0]);
-        }
-
-        if (finalTypvoie[0] != null) {
-            sql.append("AND UPPER(a.typvoie) = UPPER(?").append(paramIndex++).append(") ");
-            params.add(finalTypvoie[0]);
-        }
-
-        if (finalVoieRestante[0] != null) {
-            sql.append("AND UPPER(a.voie) LIKE UPPER(CONCAT('%', ?").append(paramIndex++).append(", '%')) ");
-            params.add(finalVoieRestante[0]);
-        }
-
-        // Add pagination
-        sql.append("LIMIT 100");
-
-        // Execute the query
-        Query query = entityManager.createNativeQuery(sql.toString(), Mutation.class);
-        for (int i = 0; i < params.size(); i++) {
-            query.setParameter(i + 1, params.get(i));
-        }
-
-        @SuppressWarnings("unchecked")
-        List<Mutation> mutations = query.getResultList();
-
-        // Convert to DTOs using parallel stream for better performance
-        return mutations.parallelStream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+        
+        return result;
     }
-
+    @Cacheable(value = "streetCommuneCache", key = "#street + '|' + #commune", unless = "#result == null || #result.isEmpty()")
 
     public List<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune) {
         if (street == null || street.trim().isEmpty() || commune == null || commune.trim().isEmpty()) {
