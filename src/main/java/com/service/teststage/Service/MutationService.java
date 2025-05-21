@@ -11,6 +11,7 @@ import com.service.teststage.dto.MutationDTO;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
@@ -65,112 +66,140 @@ public class MutationService {
                 .collect(Collectors.toList());
     }
 
-    public List<MutationDTO> searchMutations(String novoieStr, String voie) {
-        final Integer[] finalNovoie = {null};
-        final String[] finalBtq = {null};
-        final String[] finalTypvoie = {null};
-        final String[] finalVoieRestante = {null};
+   public List<MutationDTO> searchMutations(String novoieStr, String voie) {
+        // Early return if both inputs are empty
+        if ((novoieStr == null || novoieStr.trim().isEmpty()) && 
+            (voie == null || voie.trim().isEmpty())) {
+            return Collections.emptyList();
+        }
 
-        // Traitement amélioré de novoieStr pour gérer les cas comme "68B" ou "68bis"
-        if(novoieStr != null && !novoieStr.trim().isEmpty()) {
-            // Nouveau pattern qui capture le numéro et les éventuels compléments (bis, ter, etc.)
-            Matcher matcher = Pattern.compile("^(\\d+)([A-Za-z]*)$").matcher(novoieStr.trim());
-            if(matcher.find()) {
-                String numeroPart = matcher.group(1);
-                try {
-                    finalNovoie[0] = Integer.parseInt(numeroPart);
-                } catch (NumberFormatException ignored) {}
-
-                String complement = matcher.group(2);
-                if(complement != null && !complement.isEmpty()) {
-                    // Normalisation des compléments (bis, ter, etc.)
-                    if(complement.equalsIgnoreCase("B") || complement.equalsIgnoreCase("BIS")) {
-                        finalBtq[0] = "BIS";
-                    } else if(complement.equalsIgnoreCase("T") || complement.equalsIgnoreCase("TER")) {
-                        finalBtq[0] = "TER";
-                    } else {
-                        finalBtq[0] = complement.toUpperCase();
+        // Parse number and complement in one pass
+        final Integer novoie;
+        final String btq;
+        {
+            Integer parsedNovoie = null;
+            String parsedBtq = null;
+            
+            if (novoieStr != null && !novoieStr.trim().isEmpty()) {
+                String trimmed = novoieStr.trim();
+                int i = 0;
+                while (i < trimmed.length() && Character.isDigit(trimmed.charAt(i))) {
+                    i++;
+                }
+                if (i > 0) {
+                    try {
+                        parsedNovoie = Integer.parseInt(trimmed.substring(0, i));
+                        if (i < trimmed.length()) {
+                            String complement = trimmed.substring(i).toUpperCase();
+                            if (complement.equals("B") || complement.equals("BIS")) {
+                                parsedBtq = "BIS";
+                            } else if (complement.equals("T") || complement.equals("TER")) {
+                                parsedBtq = "TER";
+                            } else {
+                                parsedBtq = complement;
+                            }
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // Keep null values
                     }
                 }
             }
+            novoie = parsedNovoie;
+            btq = parsedBtq;
         }
 
-        // Traitement amélioré de la voie
-        if(voie != null && !voie.trim().isEmpty()) {
-            String voieTrimmed = voie.trim();
+        // Process voie more efficiently
+        final String typvoie;
+        final String voieRestante;
+        {
+            String foundTypvoie = null;
+            String foundVoieRestante = null;
+            
+            if (voie != null && !voie.trim().isEmpty()) {
+                String voieTrimmed = voie.trim().toUpperCase();
+                
+                for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
+                    String typeVoieKey = entry.getKey();
+                    if (voieTrimmed.startsWith(typeVoieKey)) {
+                        foundTypvoie = entry.getValue();
+                        foundVoieRestante = voieTrimmed.substring(typeVoieKey.length()).trim();
+                        break;
+                    }
+                }
+                
+                if (foundTypvoie == null && voieTrimmed.contains(" ")) {
+                    String firstWord = voieTrimmed.split(" ", 2)[0];
+                    foundTypvoie = TYPE_VOIE_MAPPING.getOrDefault(firstWord, firstWord);
+                    foundVoieRestante = voieTrimmed.substring(firstWord.length()).trim();
+                }
+            }
+            
+            typvoie = foundTypvoie;
+            voieRestante = foundVoieRestante;
+        }
 
-            // Détection du type de voie (RUE, AVENUE, etc.)
-            for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
-                String typeVoieKey = entry.getKey();
-                // Vérifier si la voie commence par le type (avec un espace ou non)
-                Pattern pattern = Pattern.compile("^" + typeVoieKey + "\\s+|^" + typeVoieKey + "$",
-                        Pattern.CASE_INSENSITIVE);
-                Matcher matcher = pattern.matcher(voieTrimmed);
-                if (matcher.find()) {
-                    finalTypvoie[0] = entry.getValue();
-                    // Retirer le type de voie pour garder juste le nom
-                    voieTrimmed = voieTrimmed.substring(matcher.end()).trim();
-                    break;
+        // Use Set to avoid duplicates more efficiently
+        Set<Mutation> uniqueMutations = new HashSet<>();
+        int pageNumber = 0;
+        final int pageSize = 1000;
+        boolean hasMorePages = true;
+
+        while (hasMorePages) {
+            Pageable pageable = PageRequest.of(pageNumber, pageSize);
+            
+            // Build predicates more efficiently
+            Page<Adresse> addressPage = adresseRepository.findAll((root, query, cb) -> {
+                List<Predicate> predicates = new ArrayList<>(4); // Pre-allocate with expected size
+
+                if (novoie != null) {
+                    predicates.add(cb.equal(root.get("novoie"), novoie));
+                }
+
+                if (btq != null) {
+                    predicates.add(cb.equal(cb.upper(root.get("btq")), btq));
+                }
+
+                if (typvoie != null) {
+                    predicates.add(cb.equal(cb.upper(root.get("typvoie")), typvoie));
+                }
+
+                if (voieRestante != null) {
+                    predicates.add(cb.like(cb.upper(root.get("voie")), "%" + voieRestante + "%"));
+                }
+
+                return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(new Predicate[0]));
+            }, pageable);
+
+            // Process addresses in a single pass
+            for (Adresse adresse : addressPage.getContent()) {
+                if (adresse.getAdresseLocals() != null) {
+                    for (AdresseLocal al : adresse.getAdresseLocals()) {
+                        if (al.getMutation() != null) {
+                            uniqueMutations.add(al.getMutation());
+                        }
+                    }
+                }
+                if (adresse.getAdresseDispoparcs() != null) {
+                    for (AdresseDispoparc adp : adresse.getAdresseDispoparcs()) {
+                        if (adp.getMutation() != null) {
+                            uniqueMutations.add(adp.getMutation());
+                        }
+                    }
                 }
             }
 
-            // Si le type de voie n'a pas été identifié mais qu'il y a un premier mot
-            if (finalTypvoie[0] == null && voieTrimmed.contains(" ")) {
-                String firstWord = voieTrimmed.split(" ", 2)[0];
-                finalTypvoie[0] = TYPE_VOIE_MAPPING.getOrDefault(firstWord.toUpperCase(), firstWord);
-                voieTrimmed = voieTrimmed.substring(firstWord.length()).trim();
-            }
-
-            // Gérer le cas spécial où la voie contient "DE"
-            if (voieTrimmed.toUpperCase().startsWith("DE ")) {
-                finalVoieRestante[0] = voieTrimmed;
-            } else {
-                finalVoieRestante[0] = voieTrimmed;
-            }
+            hasMorePages = addressPage.hasNext();
+            pageNumber++;
         }
 
-        // Requête avec les critères filtrés
-        List<Adresse> addresses = adresseRepository.findAll((root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            if(finalNovoie[0] != null) {
-                predicates.add(cb.equal(root.get("novoie"), finalNovoie[0]));
-            }
-
-            if(finalBtq[0] != null) {
-                // Recherche insensible à la casse pour le complément
-                predicates.add(cb.equal(cb.upper(root.get("btq")), finalBtq[0].toUpperCase()));
-            }
-
-            if(finalTypvoie[0] != null) {
-                // Recherche insensible à la casse pour le type de voie
-                predicates.add(cb.equal(cb.upper(root.get("typvoie")), finalTypvoie[0].toUpperCase()));
-            }
-
-            if(finalVoieRestante[0] != null) {
-                // Recherche partielle insensible à la casse pour le nom de voie
-                predicates.add(cb.like(cb.upper(root.get("voie")),
-                        "%" + finalVoieRestante[0].toUpperCase() + "%"));
-            }
-
-            return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(new Predicate[0]));
-        });
-
-        // Transformation en DTOs
-        return addresses.stream()
-                .flatMap(adresse -> Stream.concat(
-                        adresse.getAdresseLocals().stream(),
-                        adresse.getAdresseDispoparcs().stream()
-                ))
-                .map(ae -> (ae instanceof AdresseLocal) ?
-                        ((AdresseLocal) ae).getMutation() :
-                        ((AdresseDispoparc) ae).getMutation())
-                .filter(Objects::nonNull) // Ajout d'une sécurité pour éviter les mutations null
-                .distinct()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
+        // Convert to DTOs
+        List<MutationDTO> result = new ArrayList<>(uniqueMutations.size());
+        for (Mutation mutation : uniqueMutations) {
+            result.add(convertToDTO(mutation));
+        }
+        
+        return result;
     }
-
 
     @Cacheable(
         value = "mutations",
