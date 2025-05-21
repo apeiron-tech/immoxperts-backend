@@ -115,10 +115,10 @@ public class MutationService {
 
         // Build the native SQL query
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT DISTINCT m.* FROM mutation m ")
-           .append("LEFT JOIN adresse_local al ON m.idmutation = al.mutation_id ")
-           .append("LEFT JOIN adresse_dispoparc ad ON m.idmutation = ad.mutation_id ")
-           .append("LEFT JOIN adresse a ON (al.adresse_id = a.idadresse OR ad.adresse_id = a.idadresse) ")
+        sql.append("SELECT DISTINCT m.* FROM dvf.mutation m ")
+           .append("LEFT JOIN dvf.adresse_local al ON m.idmutation = al.idmutation ")
+           .append("LEFT JOIN dvf.adresse_dispoparc ad ON m.idmutation = ad.idmutation ")
+           .append("LEFT JOIN dvf.adresse a ON (al.idadresse = a.idadresse OR ad.idadresse = a.idadresse) ")
            .append("WHERE 1=1 ");
 
         List<Object> params = new ArrayList<>();
