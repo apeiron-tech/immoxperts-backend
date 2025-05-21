@@ -11,6 +11,8 @@ import com.service.teststage.dto.MutationDTO;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -30,6 +32,8 @@ public class MutationService {
     private AdresseRepository adresseRepository;
     @Autowired
     private DispositionParcelleRepository dispositionParcelleRepository;
+    @Autowired
+    private EntityManager entityManager;
     private static final Map<String, String> TYPE_VOIE_MAPPING = Map.ofEntries(
             Map.entry("COURS", "CRS"),
             Map.entry("BOULEVARD", "BD"),
@@ -64,7 +68,6 @@ public class MutationService {
 
         // Traitement amélioré de novoieStr pour gérer les cas comme "68B" ou "68bis"
         if(novoieStr != null && !novoieStr.trim().isEmpty()) {
-            // Nouveau pattern qui capture le numéro et les éventuels compléments (bis, ter, etc.)
             Matcher matcher = Pattern.compile("^(\\d+)([A-Za-z]*)$").matcher(novoieStr.trim());
             if(matcher.find()) {
                 String numeroPart = matcher.group(1);
@@ -74,7 +77,6 @@ public class MutationService {
 
                 String complement = matcher.group(2);
                 if(complement != null && !complement.isEmpty()) {
-                    // Normalisation des compléments (bis, ter, etc.)
                     if(complement.equalsIgnoreCase("B") || complement.equalsIgnoreCase("BIS")) {
                         finalBtq[0] = "BIS";
                     } else if(complement.equalsIgnoreCase("T") || complement.equalsIgnoreCase("TER")) {
@@ -90,74 +92,72 @@ public class MutationService {
         if(voie != null && !voie.trim().isEmpty()) {
             String voieTrimmed = voie.trim();
 
-            // Détection du type de voie (RUE, AVENUE, etc.)
             for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
                 String typeVoieKey = entry.getKey();
-                // Vérifier si la voie commence par le type (avec un espace ou non)
                 Pattern pattern = Pattern.compile("^" + typeVoieKey + "\\s+|^" + typeVoieKey + "$",
                         Pattern.CASE_INSENSITIVE);
                 Matcher matcher = pattern.matcher(voieTrimmed);
                 if (matcher.find()) {
                     finalTypvoie[0] = entry.getValue();
-                    // Retirer le type de voie pour garder juste le nom
                     voieTrimmed = voieTrimmed.substring(matcher.end()).trim();
                     break;
                 }
             }
 
-            // Si le type de voie n'a pas été identifié mais qu'il y a un premier mot
             if (finalTypvoie[0] == null && voieTrimmed.contains(" ")) {
                 String firstWord = voieTrimmed.split(" ", 2)[0];
                 finalTypvoie[0] = TYPE_VOIE_MAPPING.getOrDefault(firstWord.toUpperCase(), firstWord);
                 voieTrimmed = voieTrimmed.substring(firstWord.length()).trim();
             }
 
-            // Gérer le cas spécial où la voie contient "DE"
-            if (voieTrimmed.toUpperCase().startsWith("DE ")) {
-                finalVoieRestante[0] = voieTrimmed;
-            } else {
-                finalVoieRestante[0] = voieTrimmed;
-            }
+            finalVoieRestante[0] = voieTrimmed;
         }
 
-        // Requête avec les critères filtrés
-        List<Adresse> addresses = adresseRepository.findAll((root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
+        // Build the native SQL query
+        StringBuilder sql = new StringBuilder();
+        sql.append("SELECT DISTINCT m.* FROM mutation m ")
+           .append("LEFT JOIN adresse_local al ON m.idmutation = al.mutation_id ")
+           .append("LEFT JOIN adresse_dispoparc ad ON m.idmutation = ad.mutation_id ")
+           .append("LEFT JOIN adresse a ON (al.adresse_id = a.idadresse OR ad.adresse_id = a.idadresse) ")
+           .append("WHERE 1=1 ");
 
-            if(finalNovoie[0] != null) {
-                predicates.add(cb.equal(root.get("novoie"), finalNovoie[0]));
-            }
+        List<Object> params = new ArrayList<>();
+        int paramIndex = 1;
 
-            if(finalBtq[0] != null) {
-                // Recherche insensible à la casse pour le complément
-                predicates.add(cb.equal(cb.upper(root.get("btq")), finalBtq[0].toUpperCase()));
-            }
+        if (finalNovoie[0] != null) {
+            sql.append("AND a.novoie = ?").append(paramIndex++).append(" ");
+            params.add(finalNovoie[0]);
+        }
 
-            if(finalTypvoie[0] != null) {
-                // Recherche insensible à la casse pour le type de voie
-                predicates.add(cb.equal(cb.upper(root.get("typvoie")), finalTypvoie[0].toUpperCase()));
-            }
+        if (finalBtq[0] != null) {
+            sql.append("AND UPPER(a.btq) = UPPER(?").append(paramIndex++).append(") ");
+            params.add(finalBtq[0]);
+        }
 
-            if(finalVoieRestante[0] != null) {
-                // Recherche partielle insensible à la casse pour le nom de voie
-                predicates.add(cb.like(cb.upper(root.get("voie")),
-                        "%" + finalVoieRestante[0].toUpperCase() + "%"));
-            }
+        if (finalTypvoie[0] != null) {
+            sql.append("AND UPPER(a.typvoie) = UPPER(?").append(paramIndex++).append(") ");
+            params.add(finalTypvoie[0]);
+        }
 
-            return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(new Predicate[0]));
-        });
+        if (finalVoieRestante[0] != null) {
+            sql.append("AND UPPER(a.voie) LIKE UPPER(CONCAT('%', ?").append(paramIndex++).append(", '%')) ");
+            params.add(finalVoieRestante[0]);
+        }
 
-        // Transformation en DTOs
-        return addresses.stream()
-                .flatMap(adresse -> Stream.concat(
-                        adresse.getAdresseLocals().stream(),
-                        adresse.getAdresseDispoparcs().stream()
-                ))
-                .map(ae -> (ae instanceof AdresseLocal) ?
-                        ((AdresseLocal) ae).getMutation() :
-                        ((AdresseDispoparc) ae).getMutation())
-                .filter(Objects::nonNull) // Ajout d'une sécurité pour éviter les mutations null
-                .distinct()
+        // Add pagination
+        sql.append("LIMIT 100");
+
+        // Execute the query
+        Query query = entityManager.createNativeQuery(sql.toString(), Mutation.class);
+        for (int i = 0; i < params.size(); i++) {
+            query.setParameter(i + 1, params.get(i));
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Mutation> mutations = query.getResultList();
+
+        // Convert to DTOs using parallel stream for better performance
+        return mutations.parallelStream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
