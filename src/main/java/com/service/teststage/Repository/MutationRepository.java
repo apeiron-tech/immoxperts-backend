@@ -33,4 +33,21 @@ public interface MutationRepository extends JpaRepository<Mutation, String> {
     """)
     List<Mutation> findMutationsByStreetAndCommune(@Param("street") String street, @Param("commune") String commune);
 
+    @Query(value = """
+    SELECT DISTINCT m.idmutation, m.coddep, m.datemut, m.idnatmut, m.sterr, m.valeurfonc, m.vefa
+    FROM mutation m
+    JOIN adresse_local al ON m.idmutation = al.idmutation
+    JOIN adresse a ON al.idadresse = a.idadresse
+    WHERE (:novoie IS NULL OR a.novoie = :novoie)
+      AND (:btq IS NULL OR UPPER(CAST(a.btq AS TEXT)) = UPPER(:btq))
+      AND (:typvoie IS NULL OR UPPER(a.typvoie) = UPPER(:typvoie))
+      AND (:voie IS NULL OR UPPER(a.voie) LIKE CONCAT('%', UPPER(:voie), '%'))
+    """, nativeQuery = true)
+List<Object[]> fastSearchMutationsNative(
+    @Param("novoie") Integer novoie,
+    @Param("btq") String btq,
+    @Param("typvoie") String typvoie,
+    @Param("voie") String voieRestante
+);
+
 }
