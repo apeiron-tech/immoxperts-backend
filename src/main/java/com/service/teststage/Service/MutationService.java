@@ -1,7 +1,7 @@
 package com.service.teststage.Service;
 
-
-
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.service.teststage.Entity.*;
 import com.service.teststage.Repository.AdresseLocalRepository;
 import com.service.teststage.Repository.AdresseRepository;
@@ -10,12 +10,18 @@ import com.service.teststage.Repository.MutationRepository;
 import com.service.teststage.dto.MutationDTO;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -51,6 +57,11 @@ public class MutationService {
             Map.entry("QUAI", "QUAI"),
             Map.entry("QUARTIER ", "QRT")
     );
+    private final Cache<String, List<MutationDTO>> mutationCache = Caffeine.newBuilder()
+        .maximumSize(10000)
+        .expireAfterWrite(10, TimeUnit.MINUTES)
+        .build();
+
     public List<MutationDTO> getMutationsByAdresseId(Integer idadresse) {
 
         List<Mutation> mutations = mutationRepository.findByAdresseId(idadresse);
@@ -60,13 +71,21 @@ public class MutationService {
                 .collect(Collectors.toList());
     }
 
-    public List<MutationDTO> searchMutations(String novoieStr, String voie) {
+    @Async("taskExecutor")
+    @Cacheable(value = "mutations", key = "#novoieStr + '-' + #voie", unless = "#result == null")
+    public CompletableFuture<List<MutationDTO>> searchMutations(String novoieStr, String voie) {
+        String cacheKey = novoieStr + "-" + voie;
+        List<MutationDTO> cachedResult = mutationCache.getIfPresent(cacheKey);
+        if (cachedResult != null) {
+            return CompletableFuture.completedFuture(cachedResult);
+        }
+
         final Integer[] finalNovoie = {null};
         final String[] finalBtq = {null};
         final String[] finalTypvoie = {null};
         final String[] finalVoieRestante = {null};
 
-        // Traitement amélioré de novoieStr pour gérer les cas comme "68B" ou "68bis"
+        // Process novoieStr
         if(novoieStr != null && !novoieStr.trim().isEmpty()) {
             Matcher matcher = Pattern.compile("^(\\d+)([A-Za-z]*)$").matcher(novoieStr.trim());
             if(matcher.find()) {
@@ -88,38 +107,31 @@ public class MutationService {
             }
         }
 
-        // Traitement amélioré de la voie
+        // Process voie
         if(voie != null && !voie.trim().isEmpty()) {
-            String voieTrimmed = voie.trim();
-
+            String voieTrimmed = voie.trim().toUpperCase();
+            
             for (Map.Entry<String, String> entry : TYPE_VOIE_MAPPING.entrySet()) {
                 String typeVoieKey = entry.getKey();
-                Pattern pattern = Pattern.compile("^" + typeVoieKey + "\\s+|^" + typeVoieKey + "$",
-                        Pattern.CASE_INSENSITIVE);
-                Matcher matcher = pattern.matcher(voieTrimmed);
-                if (matcher.find()) {
+                if (voieTrimmed.startsWith(typeVoieKey)) {
                     finalTypvoie[0] = entry.getValue();
-                    voieTrimmed = voieTrimmed.substring(matcher.end()).trim();
+                    voieTrimmed = voieTrimmed.substring(typeVoieKey.length()).trim();
                     break;
                 }
-            }
-
-            if (finalTypvoie[0] == null && voieTrimmed.contains(" ")) {
-                String firstWord = voieTrimmed.split(" ", 2)[0];
-                finalTypvoie[0] = TYPE_VOIE_MAPPING.getOrDefault(firstWord.toUpperCase(), firstWord);
-                voieTrimmed = voieTrimmed.substring(firstWord.length()).trim();
             }
 
             finalVoieRestante[0] = voieTrimmed;
         }
 
-        // Build the native SQL query
+        // Optimized query using native SQL with pagination
         StringBuilder sql = new StringBuilder();
-        sql.append("SELECT DISTINCT m.* FROM dvf.mutation m ")
-           .append("LEFT JOIN dvf.adresse_local al ON m.idmutation = al.idmutation ")
-           .append("LEFT JOIN dvf.adresse_dispoparc ad ON m.idmutation = ad.idmutation ")
-           .append("LEFT JOIN dvf.adresse a ON (al.idadresse = a.idadresse OR ad.idadresse = a.idadresse) ")
-           .append("WHERE 1=1 ");
+        sql.append("WITH ranked_mutations AS (")
+           .append("  SELECT DISTINCT m.idmutation, m.datemut, m.valeurfonc, m.idnatmut, m.coddep, m.sterr, ")
+           .append("         ROW_NUMBER() OVER (ORDER BY m.datemut DESC) as rn ")
+           .append("  FROM dvf.mutation m ")
+           .append("  INNER JOIN dvf.adresse_local al ON m.idmutation = al.idmutation ")
+           .append("  INNER JOIN dvf.adresse a ON al.idadresse = a.idadresse ")
+           .append("  WHERE 1=1 ");
 
         List<Object> params = new ArrayList<>();
         int paramIndex = 1;
@@ -140,12 +152,12 @@ public class MutationService {
         }
 
         if (finalVoieRestante[0] != null) {
-            sql.append("AND UPPER(a.voie) LIKE UPPER(CONCAT('%', ?").append(paramIndex++).append(", '%')) ");
-            params.add(finalVoieRestante[0]);
+            sql.append("AND a.voie ILIKE ?").append(paramIndex++).append(" ");
+            params.add("%" + finalVoieRestante[0] + "%");
         }
 
-        // Add pagination
-        sql.append("LIMIT 100");
+        sql.append(") ")
+           .append("SELECT * FROM ranked_mutations WHERE rn <= 100");
 
         // Execute the query
         Query query = entityManager.createNativeQuery(sql.toString(), Mutation.class);
@@ -157,11 +169,15 @@ public class MutationService {
         List<Mutation> mutations = query.getResultList();
 
         // Convert to DTOs using parallel stream for better performance
-        return mutations.parallelStream()
+        List<MutationDTO> result = mutations.parallelStream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
-    }
 
+        // Cache the result
+        mutationCache.put(cacheKey, result);
+
+        return CompletableFuture.completedFuture(result);
+    }
 
     public List<MutationDTO> searchMutationsByStreetAndCommune(String street, String commune) {
         if (street == null || street.trim().isEmpty() || commune == null || commune.trim().isEmpty()) {
@@ -221,9 +237,10 @@ public class MutationService {
         dto.setCoddep(mutation.getCoddep());
         dto.setTerrain(mutation.getSterr());
 
-        List<String> libtyplocList = new ArrayList<>();
+        // Use Set for unique values
+        Set<String> libtyplocSet = new HashSet<>();
         int nbpprincTotal = 0;
-        List<String> addresses = new ArrayList<>();
+        Set<String> addresses = new HashSet<>();
 
         if (mutation.getAdresseLocals() != null) {
             for (AdresseLocal adresseLocal : mutation.getAdresseLocals()) {
@@ -231,67 +248,32 @@ public class MutationService {
                 if (local != null) {
                     String type = local.getLibtyploc();
                     if (type != null && !type.trim().isEmpty()) {
-                        // Normalize casing and trim
-                        libtyplocList.add(type.trim().toUpperCase());
+                        libtyplocSet.add(type.trim().toUpperCase());
                     }
                     if (local.getNbpprinc() != null) {
                         nbpprincTotal += local.getNbpprinc();
                     }
                 }
-            }
-
-            addresses.addAll(mutation.getAdresseLocals().stream()
-                    .map(al -> formatAddress(al.getAdresse()))
-                    .collect(Collectors.toList()));
-        }
-
-
-
-        dto.setLibtyplocList(libtyplocList);
-
-        if (mutation.getAdresseDispoparcs() != null) {
-            List<String> dispoparcAddresses = mutation.getAdresseDispoparcs().stream()
-                    .map(ad -> formatAddress(ad.getAdresse()))
-                    .collect(Collectors.toList());
-            addresses.addAll(dispoparcAddresses);
-
-            if (addresses.isEmpty() && mutation.getSterr() == null) {
-                BigDecimal dcntsolSum = mutation.getAdresseDispoparcs().isEmpty()
-                        ? BigDecimal.ZERO
-                        : dispositionParcelleRepository.sumDcntsolByIddispopars(
-                        mutation.getAdresseDispoparcs().stream()
-                                .map(AdresseDispoparc::getIddispopar)
-                                .collect(Collectors.toList())
-                );
-
-                BigDecimal dcntagrSum = mutation.getAdresseDispoparcs().isEmpty()
-                        ? BigDecimal.ZERO
-                        : dispositionParcelleRepository.sumDcntagrclByIddispopars(
-                        mutation.getAdresseDispoparcs().stream()
-                                .map(AdresseDispoparc::getIddispopar)
-                                .collect(Collectors.toList())
-                );
-
-                dto.setTerrain(dcntagrSum.add(dcntsolSum));
+                
+                // Add address
+                if (adresseLocal.getAdresse() != null) {
+                    addresses.add(formatAddress(adresseLocal.getAdresse()));
+                }
             }
         }
-        List<String> normalized = libtyplocList.stream()
-                .filter(Objects::nonNull)
-                .map(s -> s.trim().toUpperCase())
-                .distinct()
-                .collect(Collectors.toList());
 
-        if (normalized.size() > 1) {
+        // Convert Set to List for DTO
+        List<String> libtyplocList = new ArrayList<>(libtyplocSet);
+        if (libtyplocList.size() > 1) {
             dto.setLibtyplocList(Collections.singletonList("BIEN MULTIPLE"));
         } else {
-            dto.setLibtyplocList(normalized);
+            dto.setLibtyplocList(libtyplocList);
         }
 
-
         dto.setNbpprincTotal(nbpprincTotal);
-        dto.setAddresses(addresses);
+        dto.setAddresses(new ArrayList<>(addresses));
 
-        // Surface
+        // Get surface using cached query
         BigDecimal total = adresseLocalRepository.surfaceMutaion(mutation.getIdmutation());
         dto.setSurface(total != null ? total : BigDecimal.valueOf(0));
 

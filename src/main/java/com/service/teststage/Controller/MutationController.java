@@ -1,7 +1,5 @@
 package com.service.teststage.Controller;
 
-
-
 import com.service.teststage.Repository.MutationCustomRepository;
 import com.service.teststage.Repository.MutationRepository;
 import com.service.teststage.Service.MutationService;
@@ -12,13 +10,15 @@ import com.service.teststage.dto.PropertyStatisticsDTO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/mutations")
+@CrossOrigin(origins = "*")
 public class MutationController {
     private final PropertyStatisticsService propertyStatisticsService;
-
 
     @Autowired
     private MutationService mutationService;
@@ -35,10 +35,10 @@ public class MutationController {
             @PathVariable Integer adresseId // Changed to Integer
     ) {
         List<MutationDTO> mutations = mutationService.getMutationsByAdresseId(adresseId);
-if(mutations.isEmpty()) {
-    List<MutationDTO> mutations2 = mutationService.getMutationsByAdresseId2(adresseId);
-    return ResponseEntity.ok(mutations2);
-}
+        if(mutations.isEmpty()) {
+            List<MutationDTO> mutations2 = mutationService.getMutationsByAdresseId2(adresseId);
+            return ResponseEntity.ok(mutations2);
+        }
         return ResponseEntity.ok(mutations);
     }
     @GetMapping("/by-voie/{voie}")
@@ -46,11 +46,12 @@ if(mutations.isEmpty()) {
         return mutationService.getMutationsByVoie(voie);
     }
     @GetMapping("/search")
-    public List<MutationDTO> searchMutations(
-            @RequestParam(required = false) String novoie, // Changé en String
+    public CompletableFuture<ResponseEntity<List<MutationDTO>>> searchMutations(
+            @RequestParam(required = false) String novoieStr,
             @RequestParam(required = false) String voie) {
-
-        return mutationService.searchMutations(novoie, voie);
+        return mutationService.searchMutations(novoieStr, voie)
+                .thenApply(ResponseEntity::ok)
+                .exceptionally(ex -> ResponseEntity.internalServerError().build());
     }
     @GetMapping("/commune")
     public ResponseEntity<CommuneStatsDTO> getCommuneStats(
@@ -75,6 +76,4 @@ if(mutations.isEmpty()) {
         List<MutationDTO> results = mutationService.searchMutationsByStreetAndCommune(street, commune);
         return ResponseEntity.ok(results);
     }
-
-
 }
